@@ -10,6 +10,7 @@
   input[type="file"] { margin-top: 16px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
   <h1>Teste: YuNet detectando um rosto de verdade</h1>
@@ -28,9 +29,14 @@
    <input type="file" id="arquivosLote" accept="image/*" multiple disabled />
    <button id="processarLote" disabled>Processar lote e baixar ZIP</button>
    <p id="statusLote"></p>
+   <hr />
+   <h2>PDF (rasteriza a pagina 1)</h2>
+   <input type="file" id="arquivoPdf" accept="application/pdf" disabled />
+   <p id="statusPdf"></p>
 
   <script type="module">
     import { calcularJanela, arredondarJanela, CALIBRAGEM_PADRAO } from '/src/geometria.ts';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
     window.Module = {
       onRuntimeInitialized() {
@@ -65,6 +71,7 @@
         document.getElementById('arquivo').disabled = false;
         document.getElementById('arquivosLote').disabled = false;
         document.getElementById('processarLote').disabled = false;
+        document.getElementById('arquivoPdf').disabled = false;
       } catch (e) {
         status.textContent = '⚠️ Erro ao carregar o modelo: ' + e.message;
       }
@@ -85,6 +92,28 @@
 
     document.getElementById('processar').addEventListener('click', () => {
       processarImagem(imagemSelecionada);
+    });
+
+    document.getElementById('arquivoPdf').addEventListener('change', async (evento) => {
+      const arquivo = evento.target.files[0];
+      if (!arquivo) return;
+      nomeArquivo = arquivo.name.replace(/\.[^.]+$/, '');
+
+      const statusPdf = document.getElementById('statusPdf');
+      statusPdf.textContent = 'Lendo PDF...';
+
+      const buffer = await arquivo.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 2.78 }); // ~200 DPI (72 * 2.78)
+
+      const canvasPdf = document.createElement('canvas');
+      canvasPdf.width = viewport.width;
+      canvasPdf.height = viewport.height;
+      await page.render({ canvasContext: canvasPdf.getContext('2d'), viewport }).promise;
+
+      statusPdf.textContent = 'PDF renderizado, processando rosto...';
+      processarImagem(canvasPdf);
     });
 
     document.getElementById('baixar').addEventListener('click', () => {
