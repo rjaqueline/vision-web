@@ -22,7 +22,7 @@ export const CALIBRAGEM_PADRAO: Calibragem = {
   fatorAlturaJanela: 1.85,
   fatorAlturaMinimo: 1.7,
   fatorMargemTopo: 0.4,
-  fatorMargemTopoMinimo: 0.2,
+  fatorMargemTopoMinimo: 0.1,
   proporcaoLargura: 0.75,
 };
 

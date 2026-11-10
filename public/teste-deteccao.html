@@ -1,4 +1,4 @@
-<!DOCTYPE html>const img = cv.imread(canvasEntrada);
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
@@ -19,8 +19,10 @@
 <br />
    <canvas id="saida"></canvas>
    
-  <script>
-    var Module = {
+  <script type="module">
+    import { calcularJanela, arredondarJanela, CALIBRAGEM_PADRAO } from '/src/geometria.ts';
+
+    window.Module = {
       onRuntimeInitialized() {
         iniciar();
       }
@@ -84,23 +86,45 @@
 
   const img = cv.imread(canvasEntrada);
   cv.cvtColor(img, img, cv.COLOR_RGBA2BGR);
-  const faces = new cv.Mat();
 
+  const faces = new cv.Mat();
   detector.setInputSize(new cv.Size(img.cols, img.rows));
   detector.detect(img, faces);
 
-  status.textContent = `Rostos detectados: ${faces.rows}`;
+  if (faces.rows === 0) {
+    status.textContent = 'Nenhum rosto detectado.';
+  } else {
+    const x = faces.data32F[0];
+    const y = faces.data32F[1];
+    const w = faces.data32F[2];
+    const h = faces.data32F[3];
+    const score = faces.data32F[14];
 
-  for (let i = 0; i < faces.rows; i++) {
-    const x = faces.data32F[i * 15 + 0];
-    const y = faces.data32F[i * 15 + 1];
-    const w = faces.data32F[i * 15 + 2];
-    const h = faces.data32F[i * 15 + 3];
-    const score = faces.data32F[i * 15 + 14];
+    cv.rectangle(img, new cv.Point(x, y), new cv.Point(x + w, y + h), [255, 0, 0, 255], 2);
 
-    cv.rectangle(img, new cv.Point(x, y), new cv.Point(x + w, y + h), [255, 0, 0, 255], 3);
-    status.textContent += ` (confiança: ${score.toFixed(3)})`;
+    const rosto = { x, y, largura: w, altura: h };
+    const dimensoesImagem = { largura: img.cols, altura: img.rows };
+    const resultado = calcularJanela(rosto, dimensoesImagem, CALIBRAGEM_PADRAO);
+
+    if (resultado.ok) {
+      const janela = arredondarJanela(resultado.janela, dimensoesImagem);
+
+      cv.rectangle(
+        img,
+        new cv.Point(janela.x, janela.y),
+        new cv.Point(janela.x + janela.largura, janela.y + janela.altura),
+        [0, 255, 0, 255],
+        2,
+      );
+
+      status.textContent = `Rosto (confianca ${score.toFixed(3)}) + janela calculada ` +
+        `(deslizou: ${resultado.diagnostico.deslizou}, encolheu: ${resultado.diagnostico.encolheu})`;
+    } else {
+      status.textContent = `Rosto detectado, mas a janela foi recusada: ${resultado.motivo} — ${resultado.detalhe}`;
+    }
   }
+
+  cv.cvtColor(img, img, cv.COLOR_BGR2RGBA);
 
   const canvasSaida = document.getElementById('saida');
   canvasSaida.width = img.cols;
@@ -110,7 +134,11 @@
   img.delete();
   faces.delete();
 }
+
+    const scriptOpenCV = document.createElement('script');
+    scriptOpenCV.src = 'https://docs.opencv.org/4.x/opencv.js';
+    scriptOpenCV.async = true;
+    document.body.appendChild(scriptOpenCV);
   </script>
-  <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 </body>
 </html>
