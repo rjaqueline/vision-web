@@ -9,6 +9,7 @@
   canvas { max-width: 100%; border: 1px solid #ccc; margin-top: 16px; }
   input[type="file"] { margin-top: 16px; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
   <h1>Teste: YuNet detectando um rosto de verdade</h1>
@@ -22,6 +23,11 @@
    <canvas id="recorte"></canvas>
    <br />
    <button id="baixar" disabled>Baixar recorte</button>
+   <hr />
+   <h2>Lote (varias fotos)</h2>
+   <input type="file" id="arquivosLote" accept="image/*" multiple disabled />
+   <button id="processarLote" disabled>Processar lote e baixar ZIP</button>
+   <p id="statusLote"></p>
 
   <script type="module">
     import { calcularJanela, arredondarJanela, CALIBRAGEM_PADRAO } from '/src/geometria.ts';
@@ -57,6 +63,8 @@
 
         status.textContent = '✅ Pronto! Escolha uma foto com um rosto.';
         document.getElementById('arquivo').disabled = false;
+        document.getElementById('arquivosLote').disabled = false;
+        document.getElementById('processarLote').disabled = false;
       } catch (e) {
         status.textContent = '⚠️ Erro ao carregar o modelo: ' + e.message;
       }
@@ -91,10 +99,70 @@
       }, 'image/png');
     });
 
-    function processarImagem(imagem) {
-  const status = document.getElementById('status');
-  document.getElementById('baixar').disabled = true;
+    function carregarImagem(arquivo) {
+      return new Promise((resolve, reject) => {
+        const imagem = new Image();
+        imagem.onload = () => resolve(imagem);
+        imagem.onerror = reject;
+        imagem.src = URL.createObjectURL(arquivo);
+      });
+    }
 
+    function canvasParaBlob(canvas) {
+      return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    }
+
+    document.getElementById('processarLote').addEventListener('click', async () => {
+      const statusLote = document.getElementById('statusLote');
+      const arquivos = document.getElementById('arquivosLote').files;
+      if (arquivos.length === 0) {
+        statusLote.textContent = 'Escolha ao menos uma foto.';
+        return;
+      }
+
+      const zip = new JSZip();
+      const pastaAprovadas = zip.folder('aprovadas');
+      const pastaRevisar = zip.folder('revisar');
+      const linhasCsv = ['arquivo,status,motivo,confianca,deslizou,encolheu'];
+
+      let aprovadas = 0;
+      let revisar = 0;
+
+      for (let i = 0; i < arquivos.length; i++) {
+        const arquivo = arquivos[i];
+        const nome = arquivo.name.replace(/\.[^.]+$/, '');
+        statusLote.textContent = `Processando ${i + 1} de ${arquivos.length}...`;
+
+        const imagem = await carregarImagem(arquivo);
+        const r = recortarFoto(imagem);
+
+        if (r.ok) {
+          const blob = await canvasParaBlob(r.canvasRecorte);
+          pastaAprovadas.file(nome + '_cracha.png', blob);
+          linhasCsv.push(`${arquivo.name},aprovada,,${r.score.toFixed(3)},${r.diagnostico.deslizou},${r.diagnostico.encolheu}`);
+          aprovadas++;
+        } else {
+          pastaRevisar.file(arquivo.name, arquivo);
+          linhasCsv.push(`${arquivo.name},revisar,${r.motivo},,,`);
+          revisar++;
+        }
+      }
+
+      zip.file('relatorio.csv', linhasCsv.join('\n'));
+
+      statusLote.textContent = `Gerando ZIP... (${aprovadas} aprovadas, ${revisar} para revisar)`;
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'vision_lote.zip';
+      link.click();
+      URL.revokeObjectURL(url);
+
+      statusLote.textContent = `Concluido! ${aprovadas} aprovadas, ${revisar} para revisar.`;
+    });
+
+    function recortarFoto(imagem) {
   const LADO_MAXIMO = 800;
   const escala = Math.min(1, LADO_MAXIMO / Math.max(imagem.width, imagem.height));
 
@@ -105,65 +173,64 @@
 
   const img = cv.imread(canvasEntrada);
   cv.cvtColor(img, img, cv.COLOR_RGBA2BGR);
-
   const faces = new cv.Mat();
   detector.setInputSize(new cv.Size(img.cols, img.rows));
   detector.detect(img, faces);
 
+  let resultadoFinal;
+
   if (faces.rows === 0) {
-    status.textContent = 'Nenhum rosto detectado.';
+    resultadoFinal = { ok: false, motivo: 'nenhum_rosto', detalhe: '' };
   } else {
     const x = faces.data32F[0];
     const y = faces.data32F[1];
     const w = faces.data32F[2];
     const h = faces.data32F[3];
     const score = faces.data32F[14];
-
-    cv.rectangle(img, new cv.Point(x, y), new cv.Point(x + w, y + h), [255, 0, 0, 255], 2);
-
     const rosto = { x, y, largura: w, altura: h };
     const dimensoesImagem = { largura: img.cols, altura: img.rows };
     const resultado = calcularJanela(rosto, dimensoesImagem, CALIBRAGEM_PADRAO);
 
-    if (resultado.ok) {
+    if (!resultado.ok) {
+      resultadoFinal = { ok: false, motivo: resultado.motivo, detalhe: resultado.detalhe };
+    } else {
       const janela = arredondarJanela(resultado.janela, dimensoesImagem);
-
-      cv.rectangle(
-        img,
-        new cv.Point(janela.x, janela.y),
-        new cv.Point(janela.x + janela.largura, janela.y + janela.altura),
-        [0, 255, 0, 255],
-        2,
-      );
-
-      // recorta da imagem ORIGINAL (em imagem), convertendo as coordenadas da escala 800 de volta
       const ox = Math.round(janela.x / escala);
       const oy = Math.round(janela.y / escala);
       const ow = Math.round(janela.largura / escala);
       const oh = Math.round(janela.altura / escala);
 
-      const canvasRecorte = document.getElementById('recorte');
+      const canvasRecorte = document.createElement('canvas');
       canvasRecorte.width = 200;
       canvasRecorte.height = 267;
       canvasRecorte.getContext('2d').drawImage(imagem, ox, oy, ow, oh, 0, 0, 200, 267);
-      document.getElementById('baixar').disabled = false;
 
-      status.textContent = `Rosto (confianca ${score.toFixed(3)}) + janela calculada ` +
-        `(deslizou: ${resultado.diagnostico.deslizou}, encolheu: ${resultado.diagnostico.encolheu})`;
-    } else {
-      status.textContent = `Rosto detectado, mas a janela foi recusada: ${resultado.motivo} — ${resultado.detalhe}`;
+      resultadoFinal = { ok: true, canvasRecorte, diagnostico: resultado.diagnostico, score };
     }
   }
 
-  cv.cvtColor(img, img, cv.COLOR_BGR2RGBA);
-
-  const canvasSaida = document.getElementById('saida');
-  canvasSaida.width = img.cols;
-  canvasSaida.height = img.rows;
-  cv.imshow('saida', img);
-
   img.delete();
   faces.delete();
+  return resultadoFinal;
+}
+
+    function processarImagem(imagem) {
+  const status = document.getElementById('status');
+  document.getElementById('baixar').disabled = true;
+
+  const r = recortarFoto(imagem);
+
+  const canvasRecorte = document.getElementById('recorte');
+  if (r.ok) {
+    canvasRecorte.width = 200;
+    canvasRecorte.height = 267;
+    canvasRecorte.getContext('2d').drawImage(r.canvasRecorte, 0, 0);
+    document.getElementById('baixar').disabled = false;
+    status.textContent = `Aprovada (confianca ${r.score.toFixed(3)}) ` +
+      `(deslizou: ${r.diagnostico.deslizou}, encolheu: ${r.diagnostico.encolheu})`;
+  } else {
+    status.textContent = `Recusada: ${r.motivo}` + (r.detalhe ? ` — ${r.detalhe}` : '');
+  }
 }
 
     const scriptOpenCV = document.createElement('script');
