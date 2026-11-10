@@ -18,7 +18,9 @@
 <button id="processar" disabled>Processar imagem</button>
 <br />
    <canvas id="saida"></canvas>
-   
+   <h3>Recorte final (200x267):</h3>
+   <canvas id="recorte"></canvas>
+
   <script type="module">
     import { calcularJanela, arredondarJanela, CALIBRAGEM_PADRAO } from '/src/geometria.ts';
 
@@ -116,6 +118,17 @@
         [0, 255, 0, 255],
         2,
       );
+
+      // recorta da imagem ORIGINAL (em imagem), convertendo as coordenadas da escala 800 de volta
+      const ox = Math.round(janela.x / escala);
+      const oy = Math.round(janela.y / escala);
+      const ow = Math.round(janela.largura / escala);
+      const oh = Math.round(janela.altura / escala);
+
+      const canvasRecorte = document.getElementById('recorte');
+      canvasRecorte.width = 200;
+      canvasRecorte.height = 267;
+      canvasRecorte.getContext('2d').drawImage(imagem, ox, oy, ow, oh, 0, 0, 200, 267);
 
       status.textContent = `Rosto (confianca ${score.toFixed(3)}) + janela calculada ` +
         `(deslizou: ${resultado.diagnostico.deslizou}, encolheu: ${resultado.diagnostico.encolheu})`;
