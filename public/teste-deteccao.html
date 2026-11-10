@@ -1,0 +1,116 @@
+<!DOCTYPE html>const img = cv.imread(canvasEntrada);
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Teste de Detecção — YuNet</title>
+<style>
+  body { font-family: sans-serif; padding: 32px; max-width: 700px; margin: 0 auto; }
+  #status { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+  canvas { max-width: 100%; border: 1px solid #ccc; margin-top: 16px; }
+  input[type="file"] { margin-top: 16px; }
+</style>
+</head>
+<body>
+  <h1>Teste: YuNet detectando um rosto de verdade</h1>
+  <p id="status">⏳ Carregando OpenCV.js...</p>
+  
+  <input type="file" id="arquivo" accept="image/*" disabled />
+<button id="processar" disabled>Processar imagem</button>
+<br />
+   <canvas id="saida"></canvas>
+   
+  <script>
+    var Module = {
+      onRuntimeInitialized() {
+        iniciar();
+      }
+    };
+
+    let detector = null;
+    let imagemSelecionada = null;
+
+    async function iniciar() {
+      const status = document.getElementById('status');
+      status.textContent = '⏳ Baixando o modelo YuNet (.onnx)...';
+
+      try {
+        const resposta = await fetch('/models/face_detection_yunet_2023mar.onnx');
+        const buffer = await resposta.arrayBuffer();
+        const dados = new Uint8Array(buffer);
+        cv.FS_createDataFile('/', 'face_detection_yunet_2023mar.onnx', dados, true, false, false);
+
+        detector = new cv.FaceDetectorYN(
+          'face_detection_yunet_2023mar.onnx',
+          '',
+          new cv.Size(320, 320),
+          0.9,   // limiar de confiança (score threshold)
+          0.3,   // limiar do NMS (remove caixas duplicadas sobre o mesmo rosto)
+          5000   // top-K (quantas candidatas considerar antes de filtrar)
+        );
+
+        status.textContent = '✅ Pronto! Escolha uma foto com um rosto.';
+        document.getElementById('arquivo').disabled = false;
+      } catch (e) {
+        status.textContent = '⚠️ Erro ao carregar o modelo: ' + e.message;
+      }
+    }
+
+    document.getElementById('arquivo').addEventListener('change', (evento) => {
+      const arquivo = evento.target.files[0];
+      if (!arquivo) return;
+
+      const imagem = new Image();
+      imagem.onload = () => {
+        imagemSelecionada = imagem;
+        document.getElementById('processar').disabled = false;
+      };
+      imagem.src = URL.createObjectURL(arquivo);
+    });
+
+    document.getElementById('processar').addEventListener('click', () => {
+      processarImagem(imagemSelecionada);
+    });
+
+    function processarImagem(imagem) {
+  const status = document.getElementById('status');
+
+  const LADO_MAXIMO = 800;
+  const escala = Math.min(1, LADO_MAXIMO / Math.max(imagem.width, imagem.height));
+
+  const canvasEntrada = document.createElement('canvas');
+  canvasEntrada.width = Math.round(imagem.width * escala);
+  canvasEntrada.height = Math.round(imagem.height * escala);
+  canvasEntrada.getContext('2d').drawImage(imagem, 0, 0, canvasEntrada.width, canvasEntrada.height);
+
+  const img = cv.imread(canvasEntrada);
+  cv.cvtColor(img, img, cv.COLOR_RGBA2BGR);
+  const faces = new cv.Mat();
+
+  detector.setInputSize(new cv.Size(img.cols, img.rows));
+  detector.detect(img, faces);
+
+  status.textContent = `Rostos detectados: ${faces.rows}`;
+
+  for (let i = 0; i < faces.rows; i++) {
+    const x = faces.data32F[i * 15 + 0];
+    const y = faces.data32F[i * 15 + 1];
+    const w = faces.data32F[i * 15 + 2];
+    const h = faces.data32F[i * 15 + 3];
+    const score = faces.data32F[i * 15 + 14];
+
+    cv.rectangle(img, new cv.Point(x, y), new cv.Point(x + w, y + h), [255, 0, 0, 255], 3);
+    status.textContent += ` (confiança: ${score.toFixed(3)})`;
+  }
+
+  const canvasSaida = document.getElementById('saida');
+  canvasSaida.width = img.cols;
+  canvasSaida.height = img.rows;
+  cv.imshow('saida', img);
+
+  img.delete();
+  faces.delete();
+}
+  </script>
+  <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+</body>
+</html>
