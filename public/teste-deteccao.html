@@ -20,6 +20,8 @@
    <canvas id="saida"></canvas>
    <h3>Recorte final (200x267):</h3>
    <canvas id="recorte"></canvas>
+   <br />
+   <button id="baixar" disabled>Baixar recorte</button>
 
   <script type="module">
     import { calcularJanela, arredondarJanela, CALIBRAGEM_PADRAO } from '/src/geometria.ts';
@@ -32,6 +34,7 @@
 
     let detector = null;
     let imagemSelecionada = null;
+    let nomeArquivo = 'recorte';
 
     async function iniciar() {
       const status = document.getElementById('status');
@@ -62,6 +65,7 @@
     document.getElementById('arquivo').addEventListener('change', (evento) => {
       const arquivo = evento.target.files[0];
       if (!arquivo) return;
+      nomeArquivo = arquivo.name.replace(/\.[^.]+$/, '');
 
       const imagem = new Image();
       imagem.onload = () => {
@@ -75,8 +79,21 @@
       processarImagem(imagemSelecionada);
     });
 
+    document.getElementById('baixar').addEventListener('click', () => {
+      const canvasRecorte = document.getElementById('recorte');
+      canvasRecorte.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = nomeArquivo + '_cracha.png';
+        link.click();
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    });
+
     function processarImagem(imagem) {
   const status = document.getElementById('status');
+  document.getElementById('baixar').disabled = true;
 
   const LADO_MAXIMO = 800;
   const escala = Math.min(1, LADO_MAXIMO / Math.max(imagem.width, imagem.height));
@@ -129,6 +146,7 @@
       canvasRecorte.width = 200;
       canvasRecorte.height = 267;
       canvasRecorte.getContext('2d').drawImage(imagem, ox, oy, ow, oh, 0, 0, 200, 267);
+      document.getElementById('baixar').disabled = false;
 
       status.textContent = `Rosto (confianca ${score.toFixed(3)}) + janela calculada ` +
         `(deslizou: ${resultado.diagnostico.deslizou}, encolheu: ${resultado.diagnostico.encolheu})`;
